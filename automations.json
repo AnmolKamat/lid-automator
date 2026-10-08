@@ -1,0 +1,50 @@
+[
+  {
+    "name": "Volume 80% & Ping when lid > 100°",
+    "angle": ">100",
+    "trigger": "enter",
+    "notify": true,
+    "script": "osascript -e 'set volume output volume 80' && afplay /System/Library/Sounds/Ping.aiff",
+    "enabled": true,
+    "rules": {
+      "cooldown": 2,
+      "rearm": 95
+    }
+  },
+  {
+    "name": "Volume 25% & Tink when lid < 90°",
+    "angle": "<90",
+    "trigger": "enter",
+    "notify": true,
+    "script": "osascript -e 'set volume output volume 25' && afplay /System/Library/Sounds/Tink.aiff",
+    "enabled": true,
+    "rules": {
+      "cooldown": 2,
+      "rearm": 95
+    }
+  },
+  {
+    "name": "Set Brightness to 90% when lid > 100°",
+    "angle": ">100",
+    "trigger": "enter",
+    "notify": true,
+    "script": "builtin:brightness 90",
+    "enabled": true,
+    "rules": {
+      "cooldown": 2,
+      "rearm": 95
+    }
+  },
+  {
+    "name": "Lock Screen when closed (< 40°)",
+    "angle": "<40",
+    "trigger": "enter",
+    "notify": true,
+    "script": "builtin:lock",
+    "enabled": true,
+    "rules": {
+      "cooldown": 5,
+      "rearm": 45
+    }
+  }
+]

@@ -1,0 +1,34 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-14
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build release binary
+        run: |
+          swift build -c release --disable-sandbox
+          mkdir -p dist
+          cp .build/release/lid-automator dist/lid-automator
+          cd dist
+          tar -czvf lid-automator-${{ github.ref_name }}-arm64.tar.gz lid-automator
+          shasum -a 256 lid-automator-${{ github.ref_name }}-arm64.tar.gz > checksum.txt
+          echo "SHA256: $(cat checksum.txt)"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/lid-automator-${{ github.ref_name }}-arm64.tar.gz
+            dist/checksum.txt
+          generate_release_notes: true
