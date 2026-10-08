@@ -1,7 +1,8 @@
 .build/
 .swiftpm/
 Package.resolved
-lid-automator
+/lid-automator
+/lid-angle
 .DS_Store
 *.swp
 *.log
