@@ -1,8 +1,8 @@
 class LidAutomator < Formula
   desc "Automate scripts, notifications, and actions based on MacBook lid angles"
   homepage "https://github.com/AnmolKamat/lid-automator"
-  url "https://github.com/AnmolKamat/lid-automator/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "65abbb3465a592489d4cd4606915bf6bf5b893d3f59032150c464880fb22e045"
+  url "https://github.com/AnmolKamat/lid-automator/archive/refs/tags/v0.1.1.tar.gz"
+  sha256 "2a27f40ae2fb207c4af794e5a1aa828009fa1f85b112ee17cfc1f2526860a06f"
   license "MIT"
   head "https://github.com/AnmolKamat/lid-automator.git", branch: "main"
 
