@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-REPO="anmolkamath/lid-automator"
+REPO="AnmolKamat/lid-automator"
 INSTALL_DIR="/usr/local/bin"
 
 echo "🍎 MacBook Lid Automator Installer"

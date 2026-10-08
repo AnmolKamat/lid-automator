@@ -10,18 +10,18 @@ Built with native Swift and Apple Silicon IOKit HID (`AppleSPUHIDDevice`).
 
 ### Option A: Homebrew Tap (Recommended)
 ```bash
-brew tap anmolkamath/tap
+brew tap AnmolKamat/tap
 brew install lid-automator
 ```
 
 ### Option B: One-Liner (curl)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/anmolkamath/lid-automator/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AnmolKamat/lid-automator/main/install.sh | bash
 ```
 
 ### Option C: Build from Source
 ```bash
-git clone https://github.com/anmolkamath/lid-automator.git
+git clone https://github.com/AnmolKamat/lid-automator.git
 cd lid-automator
 swift build -c release
 sudo cp .build/release/lid-automator /usr/local/bin/
