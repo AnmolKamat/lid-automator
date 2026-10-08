@@ -650,7 +650,7 @@ final class ConfigManager {
         configURL = Self.defaultConfigURL
     }
 
-    func loadEntries() -> [AutomationEntry] {
+    func loadEntriesWithResult() -> Result<[AutomationEntry], Error> {
         var pathsToTry = [configURL]
         if configURL != Self.defaultConfigURL {
             pathsToTry.append(Self.defaultConfigURL)
@@ -665,15 +665,23 @@ final class ConfigManager {
             do {
                 let data = try Data(contentsOf: path)
                 if let entries = try? JSONDecoder().decode([AutomationEntry].self, from: data) {
-                    return entries
+                    return .success(entries)
                 }
                 struct Wrapper: Codable { let rules: [AutomationEntry] }
                 if let wrapped = try? JSONDecoder().decode(Wrapper.self, from: data) {
-                    return wrapped.rules
+                    return .success(wrapped.rules)
                 }
+                _ = try JSONDecoder().decode([AutomationEntry].self, from: data)
             } catch {
-                continue
+                return .failure(error)
             }
+        }
+        return .success([])
+    }
+
+    func loadEntries() -> [AutomationEntry] {
+        if case .success(let entries) = loadEntriesWithResult() {
+            return entries
         }
         return []
     }
@@ -723,6 +731,88 @@ final class ConfigManager {
         }
         let lower = query.lowercased()
         return list.firstIndex { $0.name.lowercased().contains(lower) }
+    }
+}
+
+// MARK: - Config File Watcher (Hot-Reload)
+
+final class ConfigFileWatcher {
+    private var lastModificationDate: Date?
+    private var lastContentHash: Int?
+    private var currentConfigPath: String = ""
+    private var lastPointerDate: Date?
+    private var timer: Timer?
+    var onReload: (([AutomationEntry]) -> Void)?
+
+    init() {
+        recordCurrentState()
+    }
+
+    private func recordCurrentState() {
+        currentConfigPath = ConfigManager.shared.configURL.path
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: currentConfigPath),
+           let mdate = attrs[.modificationDate] as? Date {
+            lastModificationDate = mdate
+        }
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: currentConfigPath)) {
+            lastContentHash = data.hashValue
+        }
+        let pointerPath = ConfigManager.chosenPointerURL.path
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: pointerPath),
+           let mdate = attrs[.modificationDate] as? Date {
+            lastPointerDate = mdate
+        }
+    }
+
+    func start() {
+        let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.check()
+        }
+        RunLoop.current.add(timer, forMode: .default)
+        self.timer = timer
+    }
+
+    func check() {
+        var needsReload = false
+
+        // 1. Check if chosen config pointer changed
+        let pointerPath = ConfigManager.chosenPointerURL.path
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: pointerPath),
+           let mdate = attrs[.modificationDate] as? Date {
+            if lastPointerDate == nil || mdate != lastPointerDate {
+                lastPointerDate = mdate
+                ConfigManager.shared = ConfigManager()
+                let newPath = ConfigManager.shared.configURL.path
+                if newPath != currentConfigPath {
+                    currentConfigPath = newPath
+                    needsReload = true
+                }
+            }
+        }
+
+        // 2. Check if active config file was modified
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: currentConfigPath),
+           let mdate = attrs[.modificationDate] as? Date {
+            if lastModificationDate == nil || mdate != lastModificationDate {
+                lastModificationDate = mdate
+                if let data = try? Data(contentsOf: URL(fileURLWithPath: currentConfigPath)) {
+                    let hash = data.hashValue
+                    if hash != lastContentHash {
+                        lastContentHash = hash
+                        needsReload = true
+                    }
+                }
+            }
+        }
+
+        if needsReload {
+            switch ConfigManager.shared.loadEntriesWithResult() {
+            case .success(let newEntries):
+                onReload?(newEntries)
+            case .failure(let error):
+                Logger.shared.log(level: "ERROR", message: "⚠️ Config file modified on disk, but invalid JSON: \(error.localizedDescription). Keeping existing rules in memory.")
+            }
+        }
     }
 }
 
@@ -1279,7 +1369,7 @@ func cmdRun(args: [String]) {
     let entries = ConfigManager.shared.loadEntries()
     Logger.shared.log(level: "INFO", message: "Lid Automator engine started with \(entries.count) rule(s) from \(ConfigManager.shared.configURL.path)")
 
-    let activeStates = entries.map { ActiveRuleState(entry: $0) }
+    var activeStates = entries.map { ActiveRuleState(entry: $0) }
 
     if let currentAngle = reader.readCurrentAngle() {
         if !isDaemon {
@@ -1292,6 +1382,35 @@ func cmdRun(args: [String]) {
             Logger.shared.log(level: "INFO", message: "Rule '\(state.entry.name)': [\(status)] Target: \(state.entry.angle.displayString) (trigger: \(state.entry.trigger?.description ?? "enter"), notify: \(state.entry.notify?.isEnabled == true))")
         }
     }
+
+    // Live config watcher: hot-reloads new config automatically without restart
+    let watcher = ConfigFileWatcher()
+    watcher.onReload = { newEntries in
+        let curAngle = reader.readCurrentAngle()
+        var updatedStates: [ActiveRuleState] = []
+
+        for entry in newEntries {
+            let state = ActiveRuleState(entry: entry)
+            if let existing = activeStates.first(where: { $0.entry.name == entry.name }) {
+                state.isArmed = existing.isArmed
+                state.lastTriggered = existing.lastTriggered
+            } else if let angle = curAngle {
+                state.isArmed = !entry.angle.matches(angle: angle)
+            } else {
+                state.isArmed = true
+            }
+            updatedStates.append(state)
+        }
+
+        activeStates = updatedStates
+        let enabledCount = activeStates.filter { $0.entry.enabled }.count
+        Logger.shared.log(level: "INFO", message: "🔄 Config hot-reloaded! Now watching \(enabledCount) active rule(s) from \(ConfigManager.shared.configURL.path)")
+
+        if !isDaemon {
+            print("\n\(Color.green)🔄 Config updated on disk! Hot-reloaded \(enabledCount) active automation(s).\(Color.reset)")
+        }
+    }
+    watcher.start()
 
     signal(SIGINT) { _ in
         print("\nExiting Lid Automator.")
