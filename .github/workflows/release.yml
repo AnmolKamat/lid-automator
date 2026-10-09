@@ -1,4 +1,4 @@
-name: Release
+name: Release & Update Homebrew
 
 on:
   push:
@@ -32,3 +32,49 @@ jobs:
             dist/lid-automator-${{ github.ref_name }}-arm64.tar.gz
             dist/checksum.txt
           generate_release_notes: true
+
+      - name: Update Homebrew Tap Formula
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::warning ::HOMEBREW_TAP_TOKEN secret is not configured. Skipping automated homebrew-tap update."
+            echo "To enable automated Homebrew updates, add a GitHub Personal Access Token (repo scope) named 'HOMEBREW_TAP_TOKEN' at:"
+            echo "https://github.com/AnmolKamat/lid-automator/settings/secrets/actions"
+            exit 0
+          fi
+
+          TAG="${{ github.ref_name }}"
+          echo "Fetching source tarball checksum for tag ${TAG}..."
+
+          ARCHIVE_URL="https://github.com/AnmolKamat/lid-automator/archive/refs/tags/${TAG}.tar.gz"
+          for i in {1..6}; do
+            HTTP_CODE=$(curl -sL -o /dev/null -w "%{http_code}" "$ARCHIVE_URL")
+            if [ "$HTTP_CODE" = "200" ]; then
+              break
+            fi
+            echo "Waiting for GitHub release archive... ($i/6)"
+            sleep 5
+          done
+
+          SHA256=$(curl -sL "$ARCHIVE_URL" | shasum -a 256 | awk '{print $1}')
+          echo "Calculated SHA256: $SHA256"
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/AnmolKamat/homebrew-tap.git" tap_repo
+          cd tap_repo
+
+          mkdir -p Formula
+          sed -i '' -E "s|url \"https://github.com/AnmolKamat/lid-automator/archive/refs/tags/.*\.tar\.gz\"|url \"${ARCHIVE_URL}\"|" Formula/lid-automator.rb
+          sed -i '' -E "s|sha256 \".*\"|sha256 \"${SHA256}\"|" Formula/lid-automator.rb
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/lid-automator.rb
+
+          if git diff --staged --quiet; then
+            echo "Formula is already up to date."
+          else
+            git commit -m "bump lid-automator to ${TAG}"
+            git push origin main
+            echo "✅ Successfully updated Homebrew Formula in AnmolKamat/homebrew-tap to ${TAG}!"
+          fi
