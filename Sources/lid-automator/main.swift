@@ -3,7 +3,7 @@
 import Foundation
 import IOKit.hid
 
-let APP_VERSION = "0.1.2"
+let APP_VERSION = "0.1.3"
 
 // MARK: - Color Formatter for Terminal Output
 
@@ -824,6 +824,7 @@ final class ActiveRuleState {
     let entry: AutomationEntry
     var isArmed: Bool = false
     var lastTriggered: Date = .distantPast
+    private let stateLock = NSLock()
 
     init(entry: AutomationEntry) {
         self.entry = entry
@@ -831,6 +832,9 @@ final class ActiveRuleState {
 
     func evaluate(angle: Double, prevAngle: Double) {
         guard entry.enabled else { return }
+
+        stateLock.lock()
+        defer { stateLock.unlock() }
 
         let now = Date()
         let cooldown = entry.rules?.cooldown ?? 5.0
@@ -843,18 +847,23 @@ final class ActiveRuleState {
         var shouldTrigger = false
         switch triggerMode {
         case .enter:
-            shouldTrigger = (!wasMatching && isMatching) || (isArmed && isMatching)
+            // Must be armed and currently inside target angle
+            shouldTrigger = isArmed && isMatching
         case .exit:
-            shouldTrigger = (wasMatching && !isMatching)
+            // Must be armed and currently outside target angle
+            shouldTrigger = isArmed && !isMatching
         case .closing:
-            shouldTrigger = ((!wasMatching && isMatching) || (isArmed && isMatching)) && (prevAngle > angle)
+            shouldTrigger = isArmed && isMatching && (prevAngle > angle)
         case .opening:
-            shouldTrigger = ((!wasMatching && isMatching) || (isArmed && isMatching)) && (prevAngle < angle)
+            shouldTrigger = isArmed && isMatching && (prevAngle < angle)
         case .change:
             shouldTrigger = (wasMatching != isMatching)
         }
 
         if shouldTrigger {
+            // Disarm immediately to prevent duplicate/repeated triggers on jitter or cooldown expiry
+            isArmed = false
+
             let timeSinceLast = now.timeIntervalSince(lastTriggered)
             if timeSinceLast < cooldown {
                 let remaining = String(format: "%.1f", cooldown - timeSinceLast)
@@ -872,9 +881,8 @@ final class ActiveRuleState {
             }
 
             // Fire action and notification!
-            ScriptRunner.run(entry: entry, angle: angle, prevAngle: prevAngle)
             lastTriggered = now
-            isArmed = false
+            ScriptRunner.run(entry: entry, angle: angle, prevAngle: prevAngle)
         } else if !isMatching {
             // Check hysteresis re-arm condition
             var shouldArm = false
@@ -883,14 +891,19 @@ final class ActiveRuleState {
                 if angle >= rearm { shouldArm = true }
             case .above:
                 if angle <= rearm { shouldArm = true }
-            case .range, .exact:
-                shouldArm = true
+            case .range(let min, let max):
+                if angle < (min - 2.0) || angle > (max + 2.0) { shouldArm = true }
+            case .exact(let v):
+                if abs(angle - v) >= 5.0 { shouldArm = true }
             }
 
             if shouldArm && !isArmed {
                 isArmed = true
                 Logger.shared.log(level: "INFO", message: "Rule '\(entry.name)' is now ARMED at \(String(format: "%.1f°", angle)) (trigger: \(triggerMode.description), target: \(entry.angle.displayString))")
             }
+        } else if triggerMode == .exit && isMatching && !isArmed {
+            // For exit rules, returning to matching zone re-arms the rule
+            isArmed = true
         }
     }
 }
@@ -903,6 +916,8 @@ final class LidSensorReader {
     private var buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 64)
     var onAngleChange: ((Double, Double) -> Void)?
     private(set) var lastAngle: Double = -1.0
+    private var lastReportTime: Date = .distantPast
+    private let readerLock = NSLock()
 
     init?() {
         self.manager = IOHIDManagerCreate(kCFAllocatorDefault, 0)
@@ -953,6 +968,36 @@ final class LidSensorReader {
         return (0...180).contains(angle) ? angle : nil
     }
 
+    func handleAngleReport(_ angle: Double, isWatchdog: Bool = false) {
+        readerLock.lock()
+        defer { readerLock.unlock() }
+
+        guard (0...180).contains(angle) else { return }
+
+        let now = Date()
+        // If watchdog timer fires, but hardware interrupt reports arrived recently (< 300ms),
+        // skip watchdog report to prevent duplicate event dispatching.
+        if isWatchdog && now.timeIntervalSince(lastReportTime) < 0.3 {
+            return
+        }
+
+        if !isWatchdog {
+            lastReportTime = now
+        }
+
+        if lastAngle < 0 {
+            lastAngle = angle
+            return
+        }
+
+        // Require at least 0.5° difference to eliminate sensor ADC jitter
+        if abs(angle - lastAngle) >= 0.5 {
+            let prev = lastAngle
+            lastAngle = angle
+            onAngleChange?(angle, prev)
+        }
+    }
+
     func startStreaming() {
         guard let device = device else { return }
         let context = Unmanaged.passUnretained(self).toOpaque()
@@ -963,26 +1008,16 @@ final class LidSensorReader {
             let this = Unmanaged<LidSensorReader>.fromOpaque(context).takeUnretainedValue()
             let bytes = Array(UnsafeBufferPointer(start: report, count: length))
             let angle = Double(UInt16(bytes[1]) | (UInt16(bytes[2]) << 8))
-            guard (0...180).contains(angle) else { return }
-
-            if this.lastAngle < 0 || abs(angle - this.lastAngle) >= 0.2 {
-                let prev = this.lastAngle
-                this.lastAngle = angle
-                this.onAngleChange?(angle, prev)
-            }
+            this.handleAngleReport(angle, isWatchdog: false)
         }, context)
 
         IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetCurrent(), CFRunLoopMode.defaultMode.rawValue)
 
-        // 2. Hybrid polling fallback watchdog (100ms)
-        let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+        // 2. Hybrid polling fallback watchdog (150ms)
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             if let angle = self.readCurrentAngle() {
-                if self.lastAngle < 0 || abs(angle - self.lastAngle) >= 0.2 {
-                    let prev = self.lastAngle
-                    self.lastAngle = angle
-                    self.onAngleChange?(angle, prev)
-                }
+                self.handleAngleReport(angle, isWatchdog: true)
             }
         }
         RunLoop.current.add(timer, forMode: .default)
