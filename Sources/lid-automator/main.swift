@@ -3,6 +3,8 @@
 import Foundation
 import IOKit.hid
 
+let APP_VERSION = "0.1.2"
+
 // MARK: - Color Formatter for Terminal Output
 
 enum Color {
@@ -1093,7 +1095,7 @@ func pad(_ s: String, _ len: Int) -> String {
 
 func printHelp() {
     print("""
-    \(Color.bold)MacBook Lid Automator (lid-automator)\(Color.reset)
+    \(Color.bold)MacBook Lid Automator (lid-automator) v\(APP_VERSION)\(Color.reset)
     Automate scripts, notifications, and system actions based on MacBook lid angles.
 
     \(Color.bold)DEFAULT CONFIG LOCATION:\(Color.reset)
@@ -1557,6 +1559,9 @@ case "config":
         print("  lid-automator config --cat             Print JSON content")
         print("  lid-automator config --edit            Edit in $EDITOR")
     }
+
+case "-v", "--version", "version":
+    print("lid-automator v\(APP_VERSION)")
 
 case "-h", "--help", "help":
     printHelp()
