@@ -47,6 +47,25 @@ lid-automator logs -f
 
 ---
 
+## 💻 Supported Devices
+
+`lid-automator` relies on Apple's continuous **Lid Angle Sensor (LAS)** communicated through the Apple SPU (`AppleSPUHIDDevice`). This hardware sensor is built into modern Apple Silicon MacBooks with the redesigned unibody chassis:
+
+| Model | Supported | Notes |
+| :--- | :---: | :--- |
+| **MacBook Pro 14"** (M1 Pro/Max, M2 Pro/Max, M3 series, M4 series, M5 series) | ✅ **Yes** | 2021 and newer |
+| **MacBook Pro 16"** (M1 Pro/Max, M2 Pro/Max, M3 Pro/Max, M4 Pro/Max, M5 series) | ✅ **Yes** | 2021 and newer |
+| **MacBook Air 13"** (M2, M3, M4, M5 series) | ✅ **Yes** | Redesigned flat chassis (2022 and newer) |
+| **MacBook Air 15"** (M2, M3, M4, M5 series) | ✅ **Yes** | Redesigned flat chassis (2023 and newer) |
+| **MacBook Air 13" (M1, 2020)** | ❌ *No* | Wedge-shaped chassis only has a binary open/closed magnet |
+| **MacBook Pro 13" with Touch Bar (M1 2020, M2 2022)** | ❌ *No* | Legacy 13" chassis only has a binary sleep switch |
+| **Desktop Macs** (Mac mini, Mac Studio, Mac Pro, iMac) | ❌ *No* | No lid / display hinge |
+
+> [!TIP]
+> **Check your Mac instantly:** Run `lid-automator status`. If your machine has the sensor, you will see the live angle in degrees and an interactive gauge immediately.
+
+---
+
 ## ⚙️ Configuration (`~/.lid-automation/config`)
 
 Default config lives at `~/.lid-automation/config`:
