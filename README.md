@@ -2,7 +2,7 @@
 
 A lightweight, native macOS tool that detects physical MacBook lid angles and triggers automated scripts, notifications, and system actions.
 
-Built with native Swift and Apple Silicon IOKit HID (`AppleSPUHIDDevice`).
+[**🌐 Interactive Showcase & Demo**](https://anmolkamat.github.io/lid-automator/) • Built with native Swift and Apple Silicon IOKit HID (`AppleSPUHIDDevice`).
 
 ---
 
